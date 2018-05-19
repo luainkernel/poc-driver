@@ -5,11 +5,13 @@
 #include <linux/string.h>
 #include <linux/device.h>
 #include <linux/cdev.h>
-#include <asm/uaccess.h>
-#define _KERNEL
+#include <linux/uaccess.h>
+
 #include <lua/lua.h>
 #include <lua/lualib.h>
 #include <lua/lauxlib.h>
+
+MODULE_LICENSE("Dual MIT/GPL");
 
 #define DEVICE_NAME "luadrv"
 #define CLASS_NAME "lua"
