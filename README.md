@@ -1,4 +1,4 @@
-# poc-driver - Linux kernel driver for Lua bindind
+# poc-driver - Linux kernel driver for lunatik
 
 ## Compiling
 To build module you need to:
@@ -7,8 +7,7 @@ Driver
 https://github.com/luainkernel/poc-driver
 Lua (kernel port)
 https://github.com/luainkernel/lunatik
-2. Download linux kernel sources and building tools (depends on your distro)
-(will assume that you have kernel tree sources in /usr/src/linux)
+2. Assume that you have kernel tree sources in /usr/src/linux
 3. create symlinks to lunatik and poc-driver in /usr/src/linux/drivers with corresponding names
 ```
 ln -s /where_you_put_lunatik_src /usr/src/linux/drivers/lunatik
@@ -59,8 +58,22 @@ cd /usr/src/linux
 make modules -j4 ARCH=x86_64
 #load
 modprobe -v lunatik
-#test
+```
+
+## Usage
+
+Loaded driver usage:
+
+Example script helloworld.lua:
+```
+print("Hello, World!")
+```
+
+Terminal:
+```
 cat helloworld.lua > /dev/luadrv
 ```
-9. EOF\0 ;)
+then check dmesg for message
+
+
 
