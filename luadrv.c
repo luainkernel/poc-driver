@@ -12,6 +12,8 @@
 #include <lua/lauxlib.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
+MODULE_AUTHOR("Pedro Tammela <pctammela@gmail.com>");
+MODULE_DESCRIPTION("sample driver for lunatik proof of concepts");
 
 #define DEVICE_NAME "luadrv"
 #define CLASS_NAME "lua"
@@ -22,7 +24,7 @@ static DEFINE_MUTEX(mtx);
 
 static int major;
 static lua_State *L;
-bool hasreturn = 0; /* does the lua state have anything for us? */
+static bool hasreturn = 0; /* does the lua state have anything for us? */
 static struct device *luadev;
 static struct class *luaclass;
 static struct cdev luacdev;
@@ -68,10 +70,10 @@ static int __init luadrv_init(void)
 		raise_err("device failed");
 		return PTR_ERR(luaclass);
 	}
-	pr_err("major - %d / minor - 1\n", major);
 	return 0;
 }
-static void __exit luadrv_exit(void) 
+
+static void __exit luadrv_exit(void)
 {
 	return;
 }
@@ -84,18 +86,21 @@ static int dev_open(struct inode *i, struct file *f)
 static ssize_t dev_read(struct file *f, char *buf, size_t len, loff_t *off)
 {
 	const char *msg = "Nothing yet.\n";
+	int msglen;
+	int err;
 	mutex_lock(&mtx);
 	if (hasreturn) {
 		msg = lua_tostring(L, -1);
 		hasreturn = false;
 	}
-	if (copy_to_user(buf, msg, len) < 0) {
+	if ((err = copy_to_user(buf, msg, len)) < 0) {
 		raise_err("copy to user failed");
 		mutex_unlock(&mtx);
 		return -ECANCELED;
 	}
 	mutex_unlock(&mtx);
-	return strlen(msg) < len ? strlen(msg) : len;
+	msglen = strlen(msg);
+	return msglen < len ? msglen : len;
 }
 
 static int flushL(void)
@@ -108,6 +113,7 @@ static int flushL(void)
 		return 1;
 	}
 	luaL_openlibs(L);
+        raise_err("flushed lua state!!");
 	return 0;
 }
 static ssize_t dev_write(struct file *f, const char *buf, size_t len,
@@ -115,18 +121,19 @@ static ssize_t dev_write(struct file *f, const char *buf, size_t len,
 {
 	char *script = NULL;
 	int idx = lua_gettop(L);
+	int err;
 	mutex_lock(&mtx);
 	script = kmalloc(len, GFP_KERNEL);
 	if (script == NULL) {
 		raise_err("no memory");
 		return -ENOMEM;
 	}
-	if (copy_from_user(script, buf, len) < 0) {
+	if ((err = copy_from_user(script, buf, len)) < 0) {
 		raise_err("copy from user failed");
 		mutex_unlock(&mtx);
 		return -ECANCELED;
 	}
-	script[len-1] = '\0';
+	script[len - 1] = '\0';
 	if (luaL_dostring(L, script)) {
 		raise_err(lua_tostring(L, -1));
 		if (flushL()) {
@@ -144,9 +151,6 @@ static ssize_t dev_write(struct file *f, const char *buf, size_t len,
 static int dev_release(struct inode *i, struct file *f)
 {
 	mutex_lock(&mtx);
-	if (flushL()) {
-		return -ECANCELED;
-	}
 	hasreturn = false;
 	mutex_unlock(&mtx);
 	return 0;
