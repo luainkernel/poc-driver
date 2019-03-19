@@ -7,9 +7,9 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 
-#include <lua/lua.h>
-#include <lua/lualib.h>
-#include <lua/lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("Pedro Tammela <pctammela@gmail.com>");
@@ -17,14 +17,15 @@ MODULE_DESCRIPTION("sample driver for lunatik proof of concepts");
 
 #define DEVICE_NAME "luadrv"
 #define CLASS_NAME "lua"
+#define LUA_MAX_MINORS  1
 
 #define raise_err(msg) pr_warn("[lua] %s - %s\n", __func__, msg);
 
 static DEFINE_MUTEX(mtx);
 
-static int major;
 static lua_State *L;
 static bool hasreturn = 0; /* does the lua state have anything for us? */
+static dev_t dev;
 static struct device *luadev;
 static struct class *luaclass;
 static struct cdev luacdev;
@@ -44,38 +45,66 @@ static struct file_operations fops =
 
 static int __init luadrv_init(void)
 {
+	int ret;
+
+	ret = alloc_chrdev_region(&dev, 0, LUA_MAX_MINORS, "lua");
+	if (ret) {
+		raise_err("alloc_chrdev_region failed");
+		goto error;
+	}
+
+	cdev_init(&luacdev, &fops);
+	ret = cdev_add(&luacdev, dev, LUA_MAX_MINORS);
+	if (ret) {
+		raise_err("cdev_add failed");
+		goto error_free_region;
+	}
+
+	luaclass = class_create(THIS_MODULE, CLASS_NAME);
+	if (IS_ERR(luaclass)) {
+		raise_err("class_create failed");
+		ret = PTR_ERR(luaclass);
+		goto error_free_cdev;
+	}
+
+	luadev = device_create(luaclass, NULL, dev,
+			NULL, "%s", DEVICE_NAME);
+	if (IS_ERR(luadev)) {
+		raise_err("device_create failed");
+		ret = PTR_ERR(luadev);
+		goto error_free_class;
+	}
+
 	L = luaL_newstate();
 	if (L == NULL) {
 		raise_err("no memory");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto error_free_device;
 	}
 	luaL_openlibs(L);
-	major = register_chrdev(0, DEVICE_NAME, &fops);
-	if (major < 0) {
-		raise_err("major number failed");
-		return -ECANCELED;
-	}
-	luaclass = class_create(THIS_MODULE, CLASS_NAME);
-	if (IS_ERR(luaclass)) {
-		unregister_chrdev(major, DEVICE_NAME);
-		raise_err("class failed");
-		return PTR_ERR(luaclass);
-	}
-	luadev = device_create(luaclass, NULL, MKDEV(major, 1),
-			NULL, "%s", DEVICE_NAME);
-	if (IS_ERR(luadev)) {
-		class_destroy(luaclass);
-		cdev_del(&luacdev);
-		unregister_chrdev(major, DEVICE_NAME);
-		raise_err("device failed");
-		return PTR_ERR(luaclass);
-	}
+
 	return 0;
+
+error_free_device:
+	device_destroy(luaclass, dev);
+error_free_class:
+	class_destroy(luaclass);
+error_free_cdev:
+	cdev_del(&luacdev);
+error_free_region:
+	unregister_chrdev_region(dev, LUA_MAX_MINORS);
+error:
+	return ret;
 }
 
 static void __exit luadrv_exit(void)
 {
-	return;
+	lua_close(L);
+
+	device_destroy(luaclass, dev);
+	class_destroy(luaclass);
+	cdev_del(&luacdev);
+	unregister_chrdev_region(dev, LUA_MAX_MINORS);
 }
 
 static int dev_open(struct inode *i, struct file *f)
@@ -113,9 +142,10 @@ static int flushL(void)
 		return 1;
 	}
 	luaL_openlibs(L);
-        raise_err("flushed lua state!!");
+	raise_err("lua state flushed");
 	return 0;
 }
+
 static ssize_t dev_write(struct file *f, const char *buf, size_t len,
 		loff_t* off)
 {
